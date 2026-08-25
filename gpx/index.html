@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPX — inspect a GPS track and trim its ends</title>
+<meta name="description" content="Read a GPX file, see the route and elevation profile, then cut the start and finish away before sharing it. Runs entirely in your browser.">
+<script src="../shared/site.js"></script>
+<link rel="stylesheet" href="../shared/base.css">
+<style>
+  .plot { background: var(--sunk); border: 1px solid var(--rule); }
+  .plot svg { display: block; width: 100%; height: auto; }
+  .track { fill: none; stroke: var(--ultra); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .track.cut { stroke: var(--rule); stroke-dasharray: 3 3; }
+  .elev { fill: var(--ultra-sh); stroke: var(--ultra); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .elevcut { fill: var(--rule); opacity: 0.35; }
+  .endcap { fill: var(--ochre); }
+  .zone { fill: var(--ochre); opacity: 0.14; }
+  .axis { stroke: var(--rule); stroke-width: 1; }
+  .axislabel { fill: var(--graphite); font-family: var(--mono); font-size: 9px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .stats div { background: var(--panel); padding: 0.6rem 0.7rem; }
+  .stats dt { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--graphite); margin: 0; }
+  .stats dd { margin: 0.15rem 0 0; font-family: var(--mono); font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+  .stats dd small { font-size: 0.65em; color: var(--graphite); }
+  .privacy { border-left: 2px solid var(--ochre); padding-left: 0.8rem; }
+  .toggle { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.9rem; margin-bottom: 0.5rem; }
+  .toggle input { width: auto; }
+</style>
+</head>
+<body data-tool="gpx">
+<div class="wrap">
+
+<header class="masthead">
+  <h1>gpx</h1>
+  <p>A GPS track records where you started and where you stopped — which is usually your front door. Look at the route, then cut a radius off each end and save a version that is safe to hand to somebody else.</p>
+</header>
+
+<div class="bench">
+
+  <div>
+    <div class="panel">
+      <h2>Track file</h2>
+      <div class="drop" id="drop" tabindex="0" role="button">Drop a .gpx file or click</div>
+      <input type="file" id="file" accept=".gpx,application/gpx+xml,text/xml" hidden>
+      <p class="note" id="fileinfo"></p>
+      <p class="note"><a href="#" id="sample" style="color:var(--ultra)">Load a sample track</a> to try it without a file of your own.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Trim the ends</h2>
+      <div class="privacy">
+        <label class="field">
+          <span>Cut from the start — <b id="sv" style="color:var(--ink)">0 m</b></span>
+          <input type="range" id="startcut" min="0" max="2000" step="25" value="0">
+        </label>
+        <label class="field">
+          <span>Cut from the finish — <b id="ev" style="color:var(--ink)">0 m</b></span>
+          <input type="range" id="endcut" min="0" max="2000" step="25" value="0">
+        </label>
+        <p class="note" id="cutinfo">Points inside these radii are deleted, not hidden.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Also remove</h2>
+      <label class="toggle"><input type="checkbox" id="striptime"> <span>Timestamps — when you were there</span></label>
+      <label class="toggle"><input type="checkbox" id="stripext"> <span>Sensor extensions — heart rate, cadence, power</span></label>
+      <label class="toggle"><input type="checkbox" id="stripmeta" checked> <span>Device, author, and track name</span></label>
+      <label class="toggle"><input type="checkbox" id="round"> <span>Round coordinates to ~11 m</span></label>
+      <button class="primary" id="save" disabled style="width:100%;margin-top:0.85rem">Save trimmed GPX</button>
+      <p class="note" id="saveinfo"></p>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Route</h2>
+      <div class="plot" id="mapwrap">
+        <svg id="map" viewBox="0 0 600 400" role="img" aria-label="Route"></svg>
+      </div>
+      <p class="note" id="maphint">Grey dashed sections will be removed. North is up; this is a plain projection, not a map.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Numbers</h2>
+      <dl class="stats" id="stats"></dl>
+    </div>
+
+    <div class="panel">
+      <h2>Elevation</h2>
+      <div class="plot">
+        <svg id="profile" viewBox="0 0 600 160" role="img" aria-label="Elevation profile"></svg>
+      </div>
+      <p class="note" id="elevnote"></p>
+    </div>
+
+    <div class="panel">
+      <h2>What the file says about you</h2>
+      <table class="readout"><tbody id="meta"></tbody></table>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var LT = window.LT || { status: function () {}, bytes: function (n) { return n + " B"; } };
+  var $ = function (id) { return document.getElementById(id); };
+
+  var points = [], doc = null, srcName = "track", srcBytes = 0;
+
+  /* ---- geometry ------------------------------------------------------- */
+
+  var R = 6371000;
+  function haversine(a, b) {
+    var dLat = (b.lat - a.lat) * Math.PI / 180;
+    var dLon = (b.lon - a.lon) * Math.PI / 180;
+    var la1 = a.lat * Math.PI / 180, la2 = b.lat * Math.PI / 180;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  function parse(text) {
+    var xml = new DOMParser().parseFromString(text, "application/xml");
+    if (xml.querySelector("parsererror")) throw new Error("That file is not valid XML.");
+    var nodes = xml.querySelectorAll("trkpt, rtept, wpt");
+    if (!nodes.length) throw new Error("No track points found. Is this a GPX file?");
+
+    var out = [];
+    nodes.forEach(function (n) {
+      var lat = parseFloat(n.getAttribute("lat")), lon = parseFloat(n.getAttribute("lon"));
+      if (isNaN(lat) || isNaN(lon)) return;
+      var ele = n.querySelector("ele"), t = n.querySelector("time");
+      out.push({
+        lat: lat, lon: lon,
+        ele: ele ? parseFloat(ele.textContent) : null,
+        time: t ? new Date(t.textContent) : null,
+        node: n
+      });
+    });
+    if (out.length < 2) throw new Error("This track has fewer than two points.");
+
+    /* cumulative distance along the track */
+    out[0].dist = 0;
+    for (var i = 1; i < out.length; i++) out[i].dist = out[i - 1].dist + haversine(out[i - 1], out[i]);
+    return { points: out, doc: xml };
+  }
+
+  /* Which points survive the two trim radii. */
+  function keptRange() {
+    var startR = +$("startcut").value, endR = +$("endcut").value;
+    var a = points[0], b = points[points.length - 1];
+    var lo = 0, hi = points.length - 1;
+    if (startR > 0) { while (lo < points.length && haversine(points[lo], a) < startR) lo++; }
+    if (endR > 0)   { while (hi >= 0 && haversine(points[hi], b) < endR) hi--; }
+    return { lo: lo, hi: hi };
+  }
+
+  /* ---- drawing -------------------------------------------------------- */
+
+  function project(pts, w, h, pad) {
+    var lats = pts.map(function (p) { return p.lat; });
+    var lons = pts.map(function (p) { return p.lon; });
+    var minLat = Math.min.apply(null, lats), maxLat = Math.max.apply(null, lats);
+    var minLon = Math.min.apply(null, lons), maxLon = Math.max.apply(null, lons);
+    /* longitude degrees shrink with latitude, so scale them before fitting */
+    var k = Math.cos((minLat + maxLat) / 2 * Math.PI / 180);
+    var spanX = Math.max(1e-9, (maxLon - minLon) * k), spanY = Math.max(1e-9, maxLat - minLat);
+    var scale = Math.min((w - pad * 2) / spanX, (h - pad * 2) / spanY);
+    var ox = (w - spanX * scale) / 2, oy = (h - spanY * scale) / 2;
+    return function (p) {
+      return [ox + (p.lon - minLon) * k * scale, h - oy - (p.lat - minLat) * scale];
+    };
+  }
+
+  function path(pts, proj) {
+    return pts.map(function (p, i) {
+      var xy = proj(p);
+      return (i ? "L" : "M") + xy[0].toFixed(1) + " " + xy[1].toFixed(1);
+    }).join("");
+  }
+
+  function drawMap() {
+    var svg = $("map"), W = 600, H = 400;
+    if (!points.length) { svg.innerHTML = ""; return; }
+    var proj = project(points, W, H, 18);
+    var r = keptRange();
+    var kept = points.slice(r.lo, r.hi + 1);
+    var head = points.slice(0, Math.min(r.lo + 1, points.length));
+    var tail = points.slice(Math.max(0, r.hi));
+
+    var s = "";
+    if (head.length > 1) s += '<path class="track cut" d="' + path(head, proj) + '"/>';
+    if (tail.length > 1) s += '<path class="track cut" d="' + path(tail, proj) + '"/>';
+    if (kept.length > 1) s += '<path class="track" d="' + path(kept, proj) + '"/>';
+
+    if (kept.length) {
+      var a = proj(kept[0]), b = proj(kept[kept.length - 1]);
+      s += '<circle class="endcap" cx="' + a[0].toFixed(1) + '" cy="' + a[1].toFixed(1) + '" r="4"/>';
+      s += '<circle class="endcap" cx="' + b[0].toFixed(1) + '" cy="' + b[1].toFixed(1) + '" r="4"/>';
+    }
+    svg.innerHTML = s;
+  }
+
+  function drawProfile() {
+    var svg = $("profile"), W = 600, H = 160, pad = 20;
+    var withEle = points.filter(function (p) { return p.ele !== null && !isNaN(p.ele); });
+    if (withEle.length < 2) {
+      svg.innerHTML = '<text class="axislabel" x="12" y="26">No elevation data in this file</text>';
+      $("elevnote").textContent = "";
+      return;
+    }
+    var eles = withEle.map(function (p) { return p.ele; });
+    var lo = Math.min.apply(null, eles), hi = Math.max.apply(null, eles);
+    var span = Math.max(1, hi - lo);
+    var total = points[points.length - 1].dist || 1;
+    var r = keptRange();
+
+    function x(p) { return pad + (p.dist / total) * (W - pad * 2); }
+    function y(p) { return H - pad - ((p.ele - lo) / span) * (H - pad * 2); }
+
+    var d = "M" + x(withEle[0]).toFixed(1) + " " + (H - pad);
+    withEle.forEach(function (p) { d += "L" + x(p).toFixed(1) + " " + y(p).toFixed(1); });
+    d += "L" + x(withEle[withEle.length - 1]).toFixed(1) + " " + (H - pad) + "Z";
+
+    var s = '<line class="axis" x1="' + pad + '" y1="' + (H - pad) + '" x2="' + (W - pad) + '" y2="' + (H - pad) + '"/>';
+    /* shade the trimmed spans */
+    if (r.lo > 0) {
+      s += '<rect class="zone" x="' + pad + '" y="' + pad + '" width="' +
+           Math.max(0, x(points[r.lo]) - pad).toFixed(1) + '" height="' + (H - pad * 2) + '"/>';
+    }
+    if (r.hi < points.length - 1) {
+      var xr = x(points[Math.max(0, r.hi)]);
+      s += '<rect class="zone" x="' + xr.toFixed(1) + '" y="' + pad + '" width="' +
+           Math.max(0, (W - pad) - xr).toFixed(1) + '" height="' + (H - pad * 2) + '"/>';
+    }
+    s += '<path class="elev" d="' + d + '"/>';
+    s += '<text class="axislabel" x="2" y="' + (pad + 4) + '">' + Math.round(hi) + ' m</text>';
+    s += '<text class="axislabel" x="2" y="' + (H - pad + 10) + '">' + Math.round(lo) + ' m</text>';
+    s += '<text class="axislabel" x="' + (W - pad) + '" y="' + (H - 4) + '" text-anchor="end">' +
+         (total / 1000).toFixed(1) + ' km</text>';
+    svg.innerHTML = s;
+  }
+
+  /* ---- stats ---------------------------------------------------------- */
+
+  function fmtDur(ms) {
+    var s = Math.round(ms / 1000);
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return h ? h + "h " + m + "m" : m + "m " + (s % 60) + "s";
+  }
+
+  function stats() {
+    var r = keptRange();
+    var kept = points.slice(r.lo, r.hi + 1);
+    var dl = $("stats");
+    if (kept.length < 2) {
+      dl.innerHTML = '<div><dt>Kept</dt><dd class="err">0 points</dd></div>';
+      return kept;
+    }
+
+    var dist = 0, gain = 0, loss = 0, maxSpeed = 0;
+    /* Elevation is measured against a moving reference rather than the
+       previous point. Comparing neighbours throws away a long climb made of
+       many small steps, and counts GPS jitter on a flat road as real. */
+    var THRESH = 3, ref = null;
+    for (var i = 0; i < kept.length; i++) {
+      if (i > 0) {
+        var step = haversine(kept[i - 1], kept[i]);
+        dist += step;
+        if (kept[i].time && kept[i - 1].time) {
+          var dt = (kept[i].time - kept[i - 1].time) / 1000;
+          if (dt > 0) maxSpeed = Math.max(maxSpeed, step / dt);
+        }
+      }
+      var e = kept[i].ele;
+      if (e === null || isNaN(e)) continue;
+      if (ref === null) { ref = e; continue; }
+      var dz = e - ref;
+      if (dz > THRESH) { gain += dz; ref = e; }
+      else if (dz < -THRESH) { loss += -dz; ref = e; }
+    }
+    var t0 = kept[0].time, t1 = kept[kept.length - 1].time;
+    var dur = t0 && t1 ? t1 - t0 : null;
+
+    var cells = [
+      ["Points kept", kept.length + " <small>of " + points.length + "</small>"],
+      ["Distance", (dist / 1000).toFixed(2) + " <small>km</small>"],
+      ["Duration", dur ? fmtDur(dur) : "—"],
+      ["Ascent", Math.round(gain) + " <small>m</small>"],
+      ["Descent", Math.round(loss) + " <small>m</small>"],
+      ["Avg speed", dur ? (dist / (dur / 1000) * 3.6).toFixed(1) + " <small>km/h</small>" : "—"],
+      ["Top speed", maxSpeed ? (maxSpeed * 3.6).toFixed(1) + " <small>km/h</small>" : "—"]
+    ];
+    dl.innerHTML = cells.map(function (c) {
+      return "<div><dt>" + c[0] + "</dt><dd>" + c[1] + "</dd></div>";
+    }).join("");
+
+    var removed = points.length - kept.length;
+    $("cutinfo").innerHTML = removed
+      ? '<span class="warn">' + removed + " point" + (removed === 1 ? "" : "s") +
+        " will be deleted — " + (haversine(points[0], kept[0]) / 1).toFixed(0) +
+        " m off the start, " + haversine(points[points.length - 1], kept[kept.length - 1]).toFixed(0) +
+        " m off the finish.</span>"
+      : "Points inside these radii are deleted, not hidden.";
+
+    $("elevnote").textContent = gain || loss
+      ? "Ascent counts a climb once it rises 3 m above the last recorded level, which keeps GPS jitter out of the total."
+      : "";
+    LT.status(kept.length + " / " + points.length + " points");
+    return kept;
+  }
+
+  function metaTable() {
+    var body = $("meta");
+    body.innerHTML = "";
+    var rows = [];
+    var creator = doc.documentElement.getAttribute("creator");
+    if (creator) rows.push(["Recorded with", creator, true]);
+    var name = doc.querySelector("trk > name, metadata > name");
+    if (name) rows.push(["Track name", name.textContent, true]);
+    var first = points[0], last = points[points.length - 1];
+    rows.push(["Starts at", first.lat.toFixed(5) + ", " + first.lon.toFixed(5), true]);
+    rows.push(["Ends at", last.lat.toFixed(5) + ", " + last.lon.toFixed(5), true]);
+    if (first.time) rows.push(["First fix", first.time.toLocaleString(), true]);
+    var ext = doc.querySelectorAll("extensions").length;
+    if (ext) rows.push(["Sensor extensions", ext + " points carry extra sensor data", true]);
+
+    rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+      if (r[2]) tr.style.color = "var(--alarm)";
+      var th = document.createElement("th"); th.textContent = r[0];
+      var td = document.createElement("td"); td.textContent = r[1];
+      td.style.wordBreak = "break-word";
+      tr.appendChild(th); tr.appendChild(td); body.appendChild(tr);
+    });
+  }
+
+  /* ---- export --------------------------------------------------------- */
+
+  function buildGPX() {
+    var r = keptRange();
+    var out = doc.cloneNode(true);
+    var all = out.querySelectorAll("trkpt, rtept, wpt");
+
+    for (var i = all.length - 1; i >= 0; i--) {
+      if (i < r.lo || i > r.hi) { all[i].parentNode.removeChild(all[i]); continue; }
+      var p = all[i];
+      if ($("striptime").checked) {
+        var t = p.querySelector("time");
+        if (t) t.parentNode.removeChild(t);
+      }
+      if ($("stripext").checked) {
+        p.querySelectorAll("extensions").forEach(function (e) { e.parentNode.removeChild(e); });
+      }
+      if ($("round").checked) {
+        p.setAttribute("lat", parseFloat(p.getAttribute("lat")).toFixed(4));
+        p.setAttribute("lon", parseFloat(p.getAttribute("lon")).toFixed(4));
+      }
+    }
+    if ($("stripmeta").checked) {
+      out.documentElement.setAttribute("creator", "localtools/gpx");
+      var md = out.querySelector("metadata");
+      if (md) md.parentNode.removeChild(md);
+      out.querySelectorAll("author, email, link, copyright").forEach(function (n) {
+        n.parentNode.removeChild(n);
+      });
+      /* "Morning loop from home" gives away as much as the coordinates do. */
+      out.querySelectorAll("trk > name, rte > name").forEach(function (n) {
+        n.parentNode.removeChild(n);
+      });
+    }
+    if ($("striptime").checked) {
+      out.querySelectorAll("time").forEach(function (n) { n.parentNode.removeChild(n); });
+    }
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+           new XMLSerializer().serializeToString(out);
+  }
+
+  $("save").onclick = function () {
+    var text = buildGPX();
+    var blob = new Blob([text], { type: "application/gpx+xml" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = srcName + "-trimmed.gpx";
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    $("saveinfo").textContent = "Saved " + LT.bytes(blob.size) + ", down from " + LT.bytes(srcBytes) + ".";
+  };
+
+  /* ---- wiring --------------------------------------------------------- */
+
+  function refresh() {
+    $("sv").textContent = $("startcut").value + " m";
+    $("ev").textContent = $("endcut").value + " m";
+    if (!points.length) return;
+    drawMap(); drawProfile(); stats();
+  }
+
+  function load(file) {
+    if (!file) return;
+    srcBytes = file.size;
+    srcName = (file.name || "track").replace(/\.gpx$/i, "");
+    var fr = new FileReader();
+    fr.onload = function () {
+      try {
+        var res = parse(fr.result);
+        points = res.points; doc = res.doc;
+        $("fileinfo").textContent = file.name + " · " + LT.bytes(file.size) + " · " + points.length + " points";
+        $("save").disabled = false;
+        metaTable();
+        refresh();
+      } catch (e) {
+        $("fileinfo").innerHTML = '<span class="err">' + e.message + "</span>";
+        points = []; $("save").disabled = true;
+        $("map").innerHTML = ""; $("profile").innerHTML = ""; $("stats").innerHTML = "";
+      }
+    };
+    fr.readAsText(file);
+  }
+
+  ["startcut", "endcut"].forEach(function (id) { $(id).addEventListener("input", refresh); });
+  ["striptime", "stripext", "stripmeta", "round"].forEach(function (id) {
+    $(id).addEventListener("change", function () { $("saveinfo").textContent = ""; });
+  });
+
+  $("sample").onclick = function (e) {
+    e.preventDefault();
+    fetch("../sample-track.gpx").then(function (r) { return r.text(); }).then(function (t) {
+      load(new File([t], "sample-track.gpx", { type: "application/gpx+xml" }));
+    }).catch(function () {
+      $("fileinfo").innerHTML = '<span class="warn">The sample only loads when the page is served over http. Opened straight from disk, drop your own file instead.</span>';
+    });
+  };
+
+  $("drop").onclick = function () { $("file").click(); };
+  $("drop").onkeydown = function (e) {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); }
+  };
+  $("file").onchange = function () { load(this.files[0]); };
+  ["dragenter", "dragover"].forEach(function (ev) {
+    $("drop").addEventListener(ev, function (e) { e.preventDefault(); this.classList.add("over"); });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    $("drop").addEventListener(ev, function (e) { e.preventDefault(); this.classList.remove("over"); });
+  });
+  $("drop").addEventListener("drop", function (e) {
+    if (e.dataTransfer.files.length) load(e.dataTransfer.files[0]);
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>

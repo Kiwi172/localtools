@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>localtools — five tools that never phone home</title>
+<meta name="description" content="Five single-purpose web tools that run entirely in your browser. No accounts, no uploads, no servers. Free and open source.">
+<script src="shared/site.js"></script>
+<link rel="stylesheet" href="shared/base.css">
+<style>
+  .hero { padding: 2rem 0 1.5rem; border-bottom: 1px solid var(--rule); }
+  .hero h1 {
+    font-family: var(--mono); font-weight: 500;
+    font-size: clamp(2.2rem, 8vw, 4.5rem);
+    letter-spacing: -0.045em; line-height: 0.95; margin: 0 0 1.1rem;
+  }
+  .hero .lede { font-size: clamp(1rem, 2.4vw, 1.2rem); max-width: 52ch; margin: 0; }
+  .hero .lede b { font-weight: 600; }
+
+  /* the claim, stated as an instrument reading */
+  .claim {
+    margin-top: 1.75rem; border: 1px solid var(--rule); background: var(--panel);
+    display: grid; grid-template-columns: repeat(3, 1fr);
+  }
+  .claim div { padding: 0.9rem 1rem; border-right: 1px solid var(--rule); }
+  .claim div:last-child { border-right: 0; }
+  .claim dt {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--graphite); margin: 0;
+  }
+  .claim dd {
+    margin: 0.25rem 0 0; font-family: var(--mono); font-size: clamp(1.1rem, 3vw, 1.6rem);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  }
+  @media (max-width: 620px) {
+    .claim { grid-template-columns: 1fr; }
+    .claim div { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .claim div:last-child { border-bottom: 0; }
+  }
+
+  /* tool index */
+  .index { margin: var(--gap) 0 0; }
+  .tool {
+    display: grid; grid-template-columns: 8.5rem 1fr 9rem;
+    gap: 1.25rem; align-items: baseline;
+    padding: 1.15rem 0; border-bottom: 1px solid var(--rule);
+    text-decoration: none; color: inherit;
+  }
+  .tool:first-child { border-top: 1px solid var(--rule); }
+  .tool:hover { background: var(--ultra-sh); }
+  .tool:hover .name { color: var(--ultra); }
+  .tool .name {
+    font-family: var(--mono); font-size: 1.5rem; font-weight: 500;
+    letter-spacing: -0.03em; margin: 0;
+  }
+  .tool .job { margin: 0; }
+  .tool .job small { display: block; color: var(--graphite); margin-top: 0.2rem; font-size: 0.85rem; }
+  .tool .takes {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--graphite); text-align: right;
+  }
+  @media (max-width: 760px) {
+    .tool { grid-template-columns: 1fr; gap: 0.35rem; }
+    .tool .takes { text-align: left; }
+  }
+
+  .prose { max-width: 62ch; margin-top: calc(var(--gap) * 2); }
+  .prose h2 {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--graphite); margin: 0 0 0.6rem;
+  }
+  .prose p { margin: 0 0 0.9rem; }
+  .prose a { color: var(--ultra); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--gap) * 2); }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; gap: var(--gap); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>localtools</h1>
+  <p class="lede">Five small tools for jobs you would otherwise hand to a stranger's server. They run in the tab you are reading this in — <b>your files never move</b>.</p>
+
+  <dl class="claim">
+    <div><dt>Network requests made</dt><dd id="c_net">0</dd></div>
+    <div><dt>Accounts required</dt><dd>0</dd></div>
+    <div><dt>Works offline</dt><dd id="c_off">yes</dd></div>
+  </dl>
+</header>
+
+<nav class="index" id="index" aria-label="Tools"></nav>
+
+<div class="cols prose" style="max-width:none">
+  <div style="max-width:62ch">
+    <h2>Why bother</h2>
+    <p>Most free online tools are a form that uploads your file to somebody's server. That is fine for a holiday photo and a bad idea for a passport scan, a GPS track that starts at your house, or a contract.</p>
+    <p>These do the same work in JavaScript, in your browser. Nothing is transmitted, so there is nothing to log, leak, or subpoena. The counter above is live — it patches <code>fetch</code> and <code>XMLHttpRequest</code> and reports what actually happened, and it will turn red if any page here ever makes a request.</p>
+  </div>
+  <div style="max-width:62ch">
+    <h2>Keeping them</h2>
+    <p>Every page is plain HTML with no dependencies. Save one to your desktop and it still works in ten years, with no internet connection and no build step. There is nothing to install and nothing to update.</p>
+    <p id="give"></p>
+  </div>
+</div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var LT = window.LT || { tools: [] };
+
+  var DETAIL = {
+    scrub: ["Strip metadata and burn out regions of an image",
+            "Shows the GPS coordinates, camera serial, and timestamp buried in a photo, then removes them.",
+            "Takes an image"],
+    qr:    ["Build a QR code that actually scans",
+            "Links, WiFi logins, contact cards, and crypto payment requests. Exports SVG and PNG.",
+            "Takes text"],
+    regex: ["Test a pattern and read it back in English",
+            "Live matching with named groups, plus a plain-English breakdown generated from the pattern itself.",
+            "Takes a pattern"],
+    cron:  ["Read a schedule and see when it fires",
+            "Turns five cryptic fields into a sentence and the next twelve dates it will run.",
+            "Takes a cron line"],
+    gpx:   ["Inspect a GPS track and trim its ends",
+            "Route, elevation profile, and a radius cut off the start and finish before you share it.",
+            "Takes a .gpx file"]
+  };
+
+  var nav = document.getElementById("index");
+  (LT.tools || []).forEach(function (t) {
+    var d = DETAIL[t.id];
+    if (!d) return;
+    var a = document.createElement("a");
+    a.className = "tool";
+    a.href = t.id + "/";
+    a.innerHTML =
+      '<h2 class="name">' + t.id + "</h2>" +
+      '<p class="job">' + d[0] + "<small>" + d[1] + "</small></p>" +
+      '<span class="takes">' + d[2] + "</span>";
+    nav.appendChild(a);
+  });
+
+  /* The counter is read from the watchdog, not hardcoded. */
+  var net = document.getElementById("c_net");
+  if (net && LT.onNet) {
+    LT.onNet(function (n) {
+      net.textContent = n;
+      if (n > 0) net.style.color = "var(--alarm)";
+    });
+  }
+
+  /* The offline claim is checked, not asserted. */
+  var off = document.getElementById("c_off");
+  if (off) off.textContent = navigator.onLine === false ? "yes — proving it now" : "yes";
+
+  var give = document.getElementById("give");
+  if (give && typeof MONERO_ADDRESS === "string" && MONERO_ADDRESS.indexOf("YOUR_MONERO") !== 0) {
+    give.innerHTML = 'They are free and always will be. If one saved you a job, ' +
+      '<a href="monero:' + MONERO_ADDRESS + '?recipient_name=localtools">a small Monero donation</a> ' +
+      'is welcome and entirely optional — the address is in the footer.';
+  } else if (give) {
+    give.innerHTML = 'They are free and always will be.';
+  }
+})();
+</script>
+</body>
+</html>

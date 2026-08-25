@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Regex — test a pattern and read it back in English</title>
+<meta name="description" content="Live regular expression tester that explains the pattern in plain English, piece by piece. Runs entirely in your browser.">
+<script src="../shared/site.js"></script>
+<link rel="stylesheet" href="../shared/base.css">
+<style>
+  .pattern-row { display: flex; border: 1px solid var(--rule); background: var(--paper); align-items: stretch; }
+  .pattern-row .slash {
+    display: flex; align-items: center; padding: 0 0.5rem;
+    font-family: var(--mono); color: var(--graphite); background: var(--sunk);
+    border-right: 1px solid var(--rule);
+  }
+  .pattern-row .slash.end { border-right: 0; border-left: 1px solid var(--rule); }
+  #pattern { border: 0; font-size: 15px; padding: 0.6rem 0.5rem; }
+  #flags { border: 0; width: 5.5em; text-align: center; font-size: 15px; padding: 0.6rem 0.2rem; }
+  #pattern:focus-visible, #flags:focus-visible { outline-offset: -2px; }
+
+  .flagset { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.3rem 0.9rem; margin-top: 0.85rem; }
+  .flagset label {
+    display: flex; gap: 0.45rem; align-items: baseline;
+    font-family: var(--mono); font-size: 11px; color: var(--graphite); cursor: pointer;
+  }
+  .flagset input { width: auto; }
+  .flagset b { color: var(--ink); font-weight: 500; }
+
+  #subject { min-height: 190px; font-size: 13px; }
+  .highlight {
+    border: 1px solid var(--rule); background: var(--paper); padding: 0.6rem;
+    font-family: var(--mono); font-size: 13px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word; min-height: 190px; overflow: auto;
+  }
+  .highlight mark {
+    background: var(--ultra); color: #fff; padding: 0.05em 0;
+    border-radius: 1px;
+  }
+  .highlight mark.alt { background: var(--ochre); color: #fff; }
+  .highlight mark.empty { padding: 0 2px; outline: 1px solid var(--ultra); background: none; }
+
+  /* the explainer tree */
+  .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+  .tree ul { margin-left: 0.85rem; padding-left: 0.85rem; border-left: 1px solid var(--rule); }
+  .tree li { padding: 0.22rem 0; font-size: 0.9rem; }
+  .tree .tok {
+    font-family: var(--mono); font-size: 12px; background: var(--sunk);
+    padding: 0.08em 0.35em; margin-right: 0.5rem; color: var(--ultra); white-space: pre;
+  }
+  .tree .say { color: var(--ink); }
+  .tree .meta { color: var(--graphite); font-size: 0.85em; }
+
+  .matches { font-family: var(--mono); font-size: 12px; }
+  .matches .m { border-bottom: 1px solid var(--rule); padding: 0.45rem 0; }
+  .matches .m:last-child { border-bottom: 0; }
+  .matches .at { color: var(--graphite); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .matches .txt { color: var(--ink); word-break: break-all; }
+  .matches .grp { color: var(--graphite); padding-left: 1rem; }
+  .matches .grp b { color: var(--ink); font-weight: 400; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  .lib { font-family: var(--mono); font-size: 11px; }
+  .lib button { width: 100%; justify-content: flex-start; text-transform: none; letter-spacing: 0; margin-bottom: 0.3rem; }
+</style>
+</head>
+<body data-tool="regex">
+<div class="wrap">
+
+<header class="masthead">
+  <h1>regex</h1>
+  <p>Write a pattern, watch it match, and read what it actually says. The explanation is generated from the pattern itself — every quantifier, class, and group, in the order the engine reads them.</p>
+</header>
+
+<div class="panel">
+  <h2>Pattern</h2>
+  <div class="pattern-row">
+    <span class="slash">/</span>
+    <input type="text" id="pattern" spellcheck="false" autocomplete="off" aria-label="Regular expression"
+           value="(?<user>[\w.+-]+)@(?<host>[\w-]+\.[\w.]{2,})">
+    <span class="slash end">/</span>
+    <input type="text" id="flags" spellcheck="false" autocomplete="off" aria-label="Flags" value="g">
+  </div>
+  <div class="flagset">
+    <label><input type="checkbox" data-flag="g"> <b>g</b> every match, not just the first</label>
+    <label><input type="checkbox" data-flag="i"> <b>i</b> ignore case</label>
+    <label><input type="checkbox" data-flag="m"> <b>m</b> ^ and $ match each line</label>
+    <label><input type="checkbox" data-flag="s"> <b>s</b> dot matches newlines</label>
+    <label><input type="checkbox" data-flag="u"> <b>u</b> full unicode</label>
+    <label><input type="checkbox" data-flag="y"> <b>y</b> match only at lastIndex</label>
+  </div>
+  <p class="note" id="patternerr"></p>
+</div>
+
+<div class="grid2">
+  <div class="panel" style="margin-top:var(--gap)">
+    <h2>Test against</h2>
+    <textarea id="subject" spellcheck="false">Reach us at support@example.org or billing@shop.co.uk.
+Bad ones: not@an, @nope.com, plain text.
+Ping ev.dev+tag@mail.example.com when the build breaks.</textarea>
+  </div>
+  <div class="panel" style="margin-top:var(--gap)">
+    <h2>Matched</h2>
+    <div class="highlight" id="highlight" aria-live="polite"></div>
+    <p class="note" id="count"></p>
+  </div>
+</div>
+
+<div class="bench" style="margin-top:var(--gap)">
+  <div>
+    <div class="panel">
+      <h2>Replace</h2>
+      <label class="field"><span>Replacement — $1, $&lt;name&gt;, $&amp; all work</span>
+        <input type="text" id="repl" value="$&lt;user&gt; at $&lt;host&gt;"></label>
+      <div class="highlight" id="replout" style="min-height:0"></div>
+    </div>
+    <div class="panel">
+      <h2>Starting points</h2>
+      <div class="lib" id="lib"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>What this pattern says</h2>
+      <ul class="tree" id="tree"></ul>
+    </div>
+    <div class="panel">
+      <h2>Matches</h2>
+      <div class="matches" id="matches"></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * A small regex parser. Enough of the JS grammar to describe a pattern
+ * back to the person who wrote it.
+ * ------------------------------------------------------------------ */
+var RX = (function () {
+  "use strict";
+
+  var CLASS_NAMES = {
+    "d": "any digit 0-9",
+    "D": "any character that is not a digit",
+    "w": "any letter, digit, or underscore",
+    "W": "any character that is not a letter, digit, or underscore",
+    "s": "any whitespace — space, tab, newline",
+    "S": "any character that is not whitespace"
+  };
+  var ESCAPES = {
+    "n": "a newline", "r": "a carriage return", "t": "a tab",
+    "f": "a form feed", "v": "a vertical tab", "0": "a null character"
+  };
+
+  function parse(src) {
+    var i = 0;
+
+    function peek() { return src[i]; }
+    function eat(c) { if (src[i] === c) { i++; return true; } return false; }
+
+    function parseAlternation() {
+      var branches = [parseSequence()];
+      while (eat("|")) branches.push(parseSequence());
+      return branches.length === 1 ? branches[0] : { type: "alt", branches: branches };
+    }
+
+    function parseSequence() {
+      var items = [];
+      while (i < src.length && src[i] !== "|" && src[i] !== ")") {
+        var atom = parseAtom();
+        if (!atom) break;
+        atom = parseQuantifier(atom);
+        items.push(atom);
+      }
+      return { type: "seq", items: items };
+    }
+
+    function parseQuantifier(atom) {
+      var c = src[i], min, max, raw;
+      if (c === "*") { min = 0; max = Infinity; raw = "*"; i++; }
+      else if (c === "+") { min = 1; max = Infinity; raw = "+"; i++; }
+      else if (c === "?") { min = 0; max = 1; raw = "?"; i++; }
+      else if (c === "{") {
+        var close = src.indexOf("}", i);
+        var body = close < 0 ? null : src.slice(i + 1, close);
+        if (body === null || !/^\d+(,\d*)?$/.test(body)) return atom;
+        raw = src.slice(i, close + 1);
+        var parts = body.split(",");
+        min = parseInt(parts[0], 10);
+        max = parts.length === 1 ? min : (parts[1] === "" ? Infinity : parseInt(parts[1], 10));
+        i = close + 1;
+      } else return atom;
+
+      var lazy = eat("?");
+      if (!lazy && src[i] === "+") { i++; return { type: "quant", min: min, max: max, possessive: true, raw: raw + "+", body: atom }; }
+      return { type: "quant", min: min, max: max, lazy: lazy, raw: raw + (lazy ? "?" : ""), body: atom };
+    }
+
+    function parseAtom() {
+      var c = src[i];
+      if (c === undefined) return null;
+
+      if (c === "(") { i++; return parseGroup(); }
+      if (c === "[") { i++; return parseClass(); }
+      if (c === ".") { i++; return { type: "dot", raw: "." }; }
+      if (c === "^") { i++; return { type: "anchor", at: "start", raw: "^" }; }
+      if (c === "$") { i++; return { type: "anchor", at: "end", raw: "$" }; }
+      if (c === "\\") { i++; return parseEscape(); }
+      i++;
+      return { type: "char", value: c, raw: c };
+    }
+
+    function parseGroup() {
+      var node = { type: "group", raw: "(" };
+      if (src[i] === "?") {
+        if (src[i + 1] === ":") { node.kind = "noncapture"; i += 2; }
+        else if (src[i + 1] === "=") { node.kind = "lookahead"; node.negate = false; i += 2; }
+        else if (src[i + 1] === "!") { node.kind = "lookahead"; node.negate = true; i += 2; }
+        else if (src[i + 1] === "<" && src[i + 2] === "=") { node.kind = "lookbehind"; node.negate = false; i += 3; }
+        else if (src[i + 1] === "<" && src[i + 2] === "!") { node.kind = "lookbehind"; node.negate = true; i += 3; }
+        else if (src[i + 1] === "<") {
+          var end = src.indexOf(">", i);
+          node.kind = "named";
+          node.name = src.slice(i + 2, end);
+          i = end + 1;
+        }
+      } else node.kind = "capture";
+
+      node.body = parseAlternation();
+      eat(")");
+      return node;
+    }
+
+    function parseClass() {
+      var node = { type: "class", negate: false, parts: [] }, start = i - 1;
+      if (eat("^")) node.negate = true;
+      var first = true;
+      while (i < src.length && (src[i] !== "]" || first)) {
+        first = false;
+        var lo;
+        if (src[i] === "\\") { i++; lo = parseEscape(); }
+        else lo = { type: "char", value: src[i], raw: src[i++] };
+
+        if (src[i] === "-" && src[i + 1] !== "]" && src[i + 1] !== undefined && lo.type === "char") {
+          i++;
+          var hi;
+          if (src[i] === "\\") { i++; hi = parseEscape(); }
+          else hi = { type: "char", value: src[i], raw: src[i++] };
+          node.parts.push({ type: "range", from: lo.value, to: hi.value });
+        } else node.parts.push(lo);
+      }
+      eat("]");
+      node.raw = src.slice(start, i);
+      return node;
+    }
+
+    function parseEscape() {
+      var c = src[i++];
+      if (CLASS_NAMES[c]) return { type: "shorthand", value: c, raw: "\\" + c };
+      if (c === "b") return { type: "anchor", at: "word", raw: "\\b" };
+      if (c === "B") return { type: "anchor", at: "nonword", raw: "\\B" };
+      if (ESCAPES[c]) return { type: "escape", value: c, raw: "\\" + c };
+      if (c === "x") { var h = src.substr(i, 2); i += 2; return { type: "code", value: h, base: 16, raw: "\\x" + h }; }
+      if (c === "u") {
+        if (src[i] === "{") { var e = src.indexOf("}", i); var b = src.slice(i + 1, e); i = e + 1; return { type: "code", value: b, base: 16, raw: "\\u{" + b + "}" }; }
+        var u = src.substr(i, 4); i += 4; return { type: "code", value: u, base: 16, raw: "\\u" + u };
+      }
+      if (c === "k" && src[i] === "<") { var ke = src.indexOf(">", i); var nm = src.slice(i + 1, ke); i = ke + 1; return { type: "backref", name: nm, raw: "\\k<" + nm + ">" }; }
+      if (/[1-9]/.test(c)) {
+        var num = c;
+        while (/\d/.test(src[i])) num += src[i++];
+        return { type: "backref", index: +num, raw: "\\" + num };
+      }
+      return { type: "char", value: c, literal: true, raw: "\\" + c };
+    }
+
+    var tree = parseAlternation();
+    return tree;
+  }
+
+  /* ---- describing ---------------------------------------------------- */
+
+  function times(min, max, lazy, possessive) {
+    var s;
+    if (min === 0 && max === Infinity) s = "zero or more times";
+    else if (min === 1 && max === Infinity) s = "one or more times";
+    else if (min === 0 && max === 1) s = "optionally — zero or one time";
+    else if (min === max) s = "exactly " + min + " time" + (min === 1 ? "" : "s");
+    else if (max === Infinity) s = min + " or more times";
+    else s = "between " + min + " and " + max + " times";
+    if (lazy) s += ", as few as possible";
+    else if (possessive) s += ", with no giving back";
+    else if (max === Infinity || max > min) s += ", as many as possible";
+    return s;
+  }
+
+  function charName(c) {
+    if (c === " ") return "a space";
+    if (c === "\t") return "a tab";
+    return "the character " + JSON.stringify(c);
+  }
+
+  function describeClassPart(p) {
+    if (p.type === "range") return p.from + " to " + p.to;
+    if (p.type === "shorthand") return CLASS_NAMES[p.value];
+    if (p.type === "escape") return ESCAPES[p.value];
+    if (p.type === "code") return "U+" + p.value.toUpperCase();
+    return JSON.stringify(p.value);
+  }
+
+  /* Turns the tree into a flat list of {depth, token, text, meta}. */
+  function explain(node, depth, out) {
+    out = out || [];
+    depth = depth || 0;
+    var push = function (tok, text, meta) { out.push({ depth: depth, tok: tok, text: text, meta: meta }); };
+
+    switch (node.type) {
+      case "seq":
+        node.items.forEach(function (n) { explain(n, depth, out); });
+        break;
+
+      case "alt":
+        push("|", "Any one of these " + node.branches.length + " alternatives:");
+        node.branches.forEach(function (b, idx) {
+          out.push({ depth: depth + 1, tok: "#" + (idx + 1), text: "Option " + (idx + 1) + ":", meta: true });
+          explain(b, depth + 2, out);
+        });
+        break;
+
+      case "group":
+        var head;
+        if (node.kind === "capture") head = "Capture what follows into a numbered group:";
+        else if (node.kind === "named") head = "Capture what follows as “" + node.name + "”:";
+        else if (node.kind === "noncapture") head = "Group these together without capturing:";
+        else if (node.kind === "lookahead") head = node.negate
+          ? "Only match if what follows is NOT ahead — nothing is consumed:"
+          : "Only match if this is ahead — nothing is consumed:";
+        else head = node.negate
+          ? "Only match if what follows is NOT just behind:"
+          : "Only match if this is just behind:";
+        push(node.kind === "named" ? "(?<" + node.name + ">" : node.kind === "capture" ? "(" : "(?…", head);
+        explain(node.body, depth + 1, out);
+        break;
+
+      case "quant":
+        var inner = [];
+        explain(node.body, 0, inner);
+        if (inner.length === 1) {
+          push(inner[0].tok + node.raw, inner[0].text + ", " + times(node.min, node.max, node.lazy, node.possessive));
+        } else {
+          push(node.raw, "Repeat the following " + times(node.min, node.max, node.lazy, node.possessive) + ":");
+          explain(node.body, depth + 1, out);
+        }
+        break;
+
+      case "class":
+        var listed = node.parts.map(describeClassPart).join(", ");
+        push(node.raw, (node.negate ? "Any character except: " : "Any one character from: ") + listed);
+        break;
+
+      case "shorthand":  push(node.raw, "Match " + CLASS_NAMES[node.value]); break;
+      case "escape":     push(node.raw, "Match " + ESCAPES[node.value]); break;
+      case "code":       push(node.raw, "Match the character U+" + node.value.toUpperCase()); break;
+      case "dot":        push(".", "Any character except a newline — unless the s flag is on"); break;
+      case "backref":    push(node.raw, node.name
+                           ? "The exact text captured earlier as “" + node.name + "”"
+                           : "The exact text captured earlier by group " + node.index); break;
+      case "anchor":
+        push(node.raw, {
+          start: "The start of the text — or of a line, with the m flag",
+          end: "The end of the text — or of a line, with the m flag",
+          word: "A word boundary — the edge between a word character and anything else",
+          nonword: "Not a word boundary"
+        }[node.at]);
+        break;
+
+      case "char":
+        push(node.raw, "Match " + charName(node.value));
+        break;
+    }
+    return out;
+  }
+
+  /* Nested quantifiers over overlapping sets are the classic way to make an
+     engine hang. Worth a warning before someone ships it. */
+  function riskScan(src) {
+    var risky = /(\([^)]*[+*][^)]*\)|\[[^\]]*\][+*]|\\[wds][+*])\s*[+*]/;
+    return risky.test(src);
+  }
+
+  return { parse: parse, explain: explain, riskScan: riskScan };
+})();
+
+/* ------------------------------------------------------------------ *
+ * Interface
+ * ------------------------------------------------------------------ */
+(function () {
+  "use strict";
+  /* Degrade gracefully if the shared script is missing. */
+  var LT = window.LT || { status: function () {}, bytes: function (n) { return n + " B"; } };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var LIBRARY = [
+    ["Email address", "(?<user>[\\w.+-]+)@(?<host>[\\w-]+\\.[\\w.]{2,})", "g"],
+    ["URL", "https?:\\/\\/[^\\s<>\"']+", "g"],
+    ["IPv4 address", "\\b(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\b", "g"],
+    ["Date, ISO 8601", "(?<y>\\d{4})-(?<m>0[1-9]|1[0-2])-(?<d>0[1-9]|[12]\\d|3[01])", "g"],
+    ["Hex colour", "#(?:[0-9a-f]{3}|[0-9a-f]{6})\\b", "gi"],
+    ["Duplicated word", "\\b(\\w+)\\s+\\1\\b", "gi"],
+    ["Trailing whitespace", "[ \\t]+$", "gm"],
+    ["Monero address", "\\b[48][0-9AB][1-9A-HJ-NP-Za-km-z]{93}\\b", "g"]
+  ];
+
+  function esc(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function syncFlagBoxes(flags) {
+    document.querySelectorAll("[data-flag]").forEach(function (b) {
+      b.checked = flags.indexOf(b.getAttribute("data-flag")) >= 0;
+    });
+  }
+
+  function run() {
+    var src = $("pattern").value;
+    var flags = $("flags").value.replace(/[^gimsuyd]/g, "");
+    $("flags").value = flags;
+    syncFlagBoxes(flags);
+
+    /* explanation first — it works even when the pattern will not compile */
+    try {
+      var lines = RX.explain(RX.parse(src), 0, []);
+      renderTree(lines);
+    } catch (e) {
+      $("tree").innerHTML = '<li class="meta">Could not read the structure of this pattern.</li>';
+    }
+
+    var re;
+    try {
+      re = new RegExp(src, flags);
+      $("patternerr").innerHTML = RX.riskScan(src)
+        ? '<span class="warn">A quantifier wrapped around another quantifier can take exponential time on text that nearly matches. Test it against a long failing string before shipping.</span>'
+        : "";
+    } catch (e) {
+      $("patternerr").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+      $("highlight").innerHTML = "";
+      $("matches").innerHTML = "";
+      $("count").textContent = "";
+      LT.status("invalid pattern");
+      return;
+    }
+
+    var subject = $("subject").value;
+    var found = [], guard = Date.now(), aborted = false;
+
+    if (flags.indexOf("g") >= 0 || flags.indexOf("y") >= 0) {
+      var m;
+      re.lastIndex = 0;
+      while ((m = re.exec(subject)) !== null) {
+        found.push(m);
+        if (m[0] === "") re.lastIndex++;           /* zero-length match: step on */
+        if (found.length > 5000 || Date.now() - guard > 400) { aborted = true; break; }
+      }
+    } else {
+      var one = re.exec(subject);
+      if (one) found.push(one);
+    }
+
+    /* highlight */
+    var html = "", cursor = 0;
+    found.forEach(function (m, idx) {
+      html += esc(subject.slice(cursor, m.index));
+      var cls = (idx % 2 ? "alt" : "") + (m[0] === "" ? " empty" : "");
+      html += '<mark class="' + cls.trim() + '">' + (m[0] === "" ? "" : esc(m[0])) + "</mark>";
+      cursor = m.index + m[0].length;
+    });
+    html += esc(subject.slice(cursor));
+    $("highlight").innerHTML = html || '<span class="meta">Nothing to match against.</span>';
+
+    $("count").textContent = found.length === 0
+      ? "No matches."
+      : found.length + " match" + (found.length === 1 ? "" : "es") +
+        (aborted ? " — stopped early, this pattern is slow on this input" : "");
+    $("count").className = aborted ? "note warn" : "note";
+    LT.status(found.length + " match" + (found.length === 1 ? "" : "es"));
+
+    /* match list */
+    var out = "";
+    found.slice(0, 60).forEach(function (m, idx) {
+      out += '<div class="m"><div class="at">Match ' + (idx + 1) + " · index " + m.index + "</div>";
+      out += '<div class="txt">' + (m[0] === "" ? "<em>empty match</em>" : esc(m[0])) + "</div>";
+      for (var g = 1; g < m.length; g++) {
+        out += '<div class="grp">' + g + ": <b>" + (m[g] === undefined ? "—" : esc(m[g])) + "</b></div>";
+      }
+      if (m.groups) {
+        Object.keys(m.groups).forEach(function (k) {
+          out += '<div class="grp">' + esc(k) + ": <b>" + (m.groups[k] === undefined ? "—" : esc(m.groups[k])) + "</b></div>";
+        });
+      }
+      out += "</div>";
+    });
+    $("matches").innerHTML = out || '<span class="meta">No matches.</span>';
+
+    /* replacement */
+    try {
+      var rep = subject.replace(re, $("repl").value);
+      $("replout").innerHTML = esc(rep);
+    } catch (e) {
+      $("replout").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+    }
+  }
+
+  function renderTree(lines) {
+    var root = $("tree");
+    root.innerHTML = "";
+    var stack = [root];
+    lines.forEach(function (l) {
+      while (stack.length > l.depth + 1) stack.pop();
+      while (stack.length < l.depth + 1) {
+        var ul = document.createElement("ul");
+        var host = stack[stack.length - 1].lastElementChild || stack[stack.length - 1];
+        host.appendChild(ul);
+        stack.push(ul);
+      }
+      var li = document.createElement("li");
+      if (l.meta) {
+        li.innerHTML = '<span class="meta">' + esc(l.text) + "</span>";
+      } else {
+        li.innerHTML = '<span class="tok">' + esc(l.tok) + '</span><span class="say">' + esc(l.text) + "</span>";
+      }
+      stack[stack.length - 1].appendChild(li);
+    });
+    if (!lines.length) root.innerHTML = '<li class="meta">An empty pattern matches at every position.</li>';
+  }
+
+  /* library */
+  LIBRARY.forEach(function (entry) {
+    var b = document.createElement("button");
+    b.textContent = entry[0];
+    b.onclick = function () {
+      $("pattern").value = entry[1];
+      $("flags").value = entry[2];
+      run();
+    };
+    $("lib").appendChild(b);
+  });
+
+  document.querySelectorAll("[data-flag]").forEach(function (box) {
+    box.onchange = function () {
+      var f = $("flags").value.replace(this.getAttribute("data-flag"), "");
+      if (this.checked) f += this.getAttribute("data-flag");
+      $("flags").value = f;
+      run();
+    };
+  });
+
+  ["pattern", "flags", "subject", "repl"].forEach(function (id) {
+    $(id).addEventListener("input", run);
+  });
+  run();
+})();
+</script>
+</body>
+</html>
