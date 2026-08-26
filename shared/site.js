@@ -138,6 +138,22 @@ var SOURCE_URL     = "https://github.com/Kiwi172/localtools";
     paint();
   }
 
+  /* ---- favicon -------------------------------------------------------- */
+  /* Inlined as a data URI so it costs no request and cannot be a tracker. */
+
+  function favicon() {
+    if (document.querySelector('link[rel="icon"]')) return;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+      '<rect width="32" height="32" rx="3" fill="#14161A"/>' +
+      '<rect x="7" y="7" width="18" height="18" fill="none" stroke="#5B7BFF" stroke-width="3"/>' +
+      '<rect x="13" y="13" width="6" height="6" fill="#5B7BFF"/></svg>';
+    var link = document.createElement("link");
+    link.rel = "icon";
+    link.type = "image/svg+xml";
+    link.href = "data:image/svg+xml," + encodeURIComponent(svg);
+    document.head.appendChild(link);
+  }
+
   /* ---- footer --------------------------------------------------------- */
 
   function buildFooter() {
@@ -203,6 +219,6 @@ var SOURCE_URL     = "https://github.com/Kiwi172/localtools";
   };
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () { build(); buildFooter(); });
-  } else { build(); buildFooter(); }
+    document.addEventListener("DOMContentLoaded", function () { favicon(); build(); buildFooter(); });
+  } else { favicon(); build(); buildFooter(); }
 })();
