@@ -5,8 +5,8 @@
  *
  * EDIT THIS ONE LINE to change the donation address everywhere:
  */
-var MONERO_ADDRESS = "YOUR_MONERO_SUBADDRESS_HERE";
-var SOURCE_URL     = "https://github.com/YOUR_USERNAME/localtools";
+var MONERO_ADDRESS = "8ACg45xXbJDMn68kJZzofM8JcUzbtasRXed45SnKXpfdXFSay19GSYd4kngj6ex6uqFBmxE3d81JtD3qpPq9ydzBDHbETXf";
+var SOURCE_URL     = "https://github.com/Kiwi172/localtools";
 
 (function () {
   "use strict";
