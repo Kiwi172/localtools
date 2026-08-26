@@ -33,19 +33,32 @@ Every tool also works opened directly from disk (`file://`), with two
 exceptions: the sample GPX track loads only over http, and clipboard access
 needs a secure context.
 
-## Setting your donation address
+## Support
 
-The Monero address lives in exactly one place, `shared/site.js`. Set it with:
+These are free and always will be. If one of them saved you a job, a small
+Monero donation is welcome and entirely optional.
+
+```
+8ACg45xXbJDMn68kJZzofM8JcUzbtasRXed45SnKXpfdXFSay19GSYd4kngj6ex6uqFBmxE3d81JtD3qpPq9ydzBDHbETXf
+```
+
+That is a dedicated subaddress for this project. The same address is in the
+footer of every page, where clicking it opens your wallet directly.
+
+To generate a scannable QR for it, use the [qr](qr/) tool in this repo: pick
+**Crypto payment**, choose Monero, paste the address, and export an SVG.
+
+## Forking this
+
+The donation address lives in exactly one place, `shared/site.js`. If you fork
+this, point it at your own with:
 
 ```bash
-./set-donation.sh 8xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx https://github.com/you/localtools
+./set-donation.sh <your-monero-address> https://github.com/you/localtools
 ```
 
 Use a dedicated subaddress rather than your primary address. Until one is set,
 the footer shows a reminder instead of a donation link.
-
-You can generate the matching QR code with the `qr` tool in this repo — pick
-**Crypto payment**, choose Monero, paste the address, and export an SVG.
 
 ## Layout
 
