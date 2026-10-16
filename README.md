@@ -1,5 +1,7 @@
 # localtools
 
+[![CI](https://github.com/Kiwi172/localtools/actions/workflows/ci.yml/badge.svg)](https://github.com/Kiwi172/localtools/actions/workflows/ci.yml)
+
 Five single-purpose web tools that run entirely in your browser. No accounts, no
 uploads, no servers, no build step, no dependencies.
 
